@@ -5,7 +5,7 @@ import time
 import requests
 
 from dotenv import load_dotenv
-from telebot import TeleBot, apihelper
+from telebot import TeleBot
 
 from exceptions import EnvironmentVarsException, NotHttp200StatusException
 
