@@ -1,10 +1,11 @@
 import logging
 import os
+import sys
 import time
 import requests
 
 from dotenv import load_dotenv
-from telebot import TeleBot
+from telebot import TeleBot, apihelper
 
 from exceptions import EnvironmentVarsException, NotHttp200StatusException
 
@@ -34,10 +35,16 @@ formatter = logging.Formatter(
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-handler = logging.StreamHandler()
-handler.setLevel(logging.DEBUG)
-handler.setFormatter(formatter)
-logger.addHandler(handler)
+handler_out = logging.StreamHandler(sys.stdout)
+handler_out.setLevel(logging.DEBUG)
+handler_out.setFormatter(formatter)
+
+handler_err = logging.StreamHandler(sys.stderr)
+handler_err.setLevel(logging.WARNING)
+handler_err.setFormatter(formatter)
+
+logger.addHandler(handler_out)
+logger.addHandler(handler_err)
 
 current_verdict = None
 
@@ -53,8 +60,8 @@ def send_message(bot, message):
     try:
         bot.send_message(TELEGRAM_CHAT_ID, message)
         logging.debug('Сообщение отправлено')
-    except Exception:
-        logging.error('Сообщение не отправлено', exc_info=True)
+    except Exception as error:
+        logging.error(f'Сообщение не отправлено: {error}')
 
 
 def get_api_answer(timestamp):
@@ -121,12 +128,10 @@ def main():
                 check = check_response(result)
                 logging.debug('Ответ разобран')
                 parsing = parse_status(check)
-                if parsing is not None:
-                    send_message(bot, message=parsing)
-            except (NotHttp200StatusException, KeyError) as error:
-                logging.error(error, exc_info=True)
+                send_message(bot, message=parsing)
             except Exception as error:
-                logging.error(f'Сбой в работе программы: {error}')
+                message = f'Сбой в работе программы: {error}'
+                send_message(bot, message=message)
             finally:
                 time.sleep(RETRY_PERIOD)
 
