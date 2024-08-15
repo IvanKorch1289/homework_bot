@@ -2,13 +2,13 @@ import logging
 import os
 import sys
 import time
-import requests
+from http import HTTPStatus
 
+import requests
 from dotenv import load_dotenv
 from telebot import TeleBot
 
 from exceptions import EnvironmentVarsException, NotHttp200StatusException
-
 
 load_dotenv()
 
@@ -46,18 +46,33 @@ handler_err.setFormatter(formatter)
 logger.addHandler(handler_out)
 logger.addHandler(handler_err)
 
-current_verdict = None
+
+class CurrentVerdict:
+    """Класс-синглтон для хранения последнего вердикта."""
+
+    _verdict = None
+
+    def __new__(cls):
+        """Метод создания одного единственного экземпляра класса."""
+        if not hasattr(cls, 'instance'):
+            cls.instance = super(CurrentVerdict, cls).__new__(cls)
+        return cls.instance
+
+    def change_verdict(self, current_verdict):
+        """Метод изменения атрибута verdict экземпляра."""
+        self._verdict = current_verdict
 
 
 def check_tokens():
     """Функция проверки переменных окружения."""
     const_list = [PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID]
-    return (False if None in const_list else True)
+    return all(const_list)
 
 
 def send_message(bot, message):
     """Функция отправки сообщения боту."""
     try:
+        logging.debug('Попытка отправить сообщение')
         bot.send_message(TELEGRAM_CHAT_ID, message)
         logging.debug('Сообщение отправлено')
     except Exception as error:
@@ -74,42 +89,34 @@ def get_api_answer(timestamp):
             headers=HEADERS,
             params=payload
         )
-        if response.status_code != 200:
+        if response.status_code != HTTPStatus.OK:
             raise NotHttp200StatusException('Статус ответа не равен 200')
         return response.json()
     except requests.RequestException:
-        pass
+        logging.error('Ошибка запроса к Яндекс.Практикум')
 
 
 def check_response(response):
     """Функция проверки ответа сервиса."""
     if not isinstance(response, dict):
-        raise TypeError
+        raise TypeError('Некорректная структура ответа сервиса')
     if not isinstance(response.get('homeworks'), list):
-        raise TypeError
+        raise TypeError('Некорректный формат ответа для параметра "homeworks"')
 
     homeworks = response.get('homeworks')
-    if len(homeworks) > 0:
-        return homeworks[0]
-    return None
+    return homeworks[0] if homeworks else None
 
 
 def parse_status(homework):
     """Функция получения результата из запроса."""
-    global current_verdict
-    check_key_name = 'homework_name' in homework.keys()
-    check_status = homework['status'] in HOMEWORK_VERDICTS.keys()
-    if check_key_name and check_status:
-        homework_name = homework.get('homework_name')
-        verdict = HOMEWORK_VERDICTS.get(homework.get('status'))
-        if current_verdict != verdict:
-            current_verdict = verdict
-            return (
-                'Изменился статус проверки работы '
-                f'"{homework_name}". {verdict}'
-            )
+    current_verdict = CurrentVerdict()
+    homework_name = homework.get('homework_name')
+    verdict = HOMEWORK_VERDICTS.get(homework.get('status'))
+    if current_verdict._verdict != verdict and homework_name and verdict:
+        current_verdict.change_verdict(verdict)
+        return f'Изменился статус проверки работы "{homework_name}". {verdict}'
     else:
-        raise KeyError
+        raise KeyError('Не найдены необходимые параметры в ответе')
 
 
 def main():
@@ -127,8 +134,9 @@ def main():
                 logging.debug('Ответ получен')
                 check = check_response(result)
                 logging.debug('Ответ разобран')
-                parsing = parse_status(check)
-                send_message(bot, message=parsing)
+                if check:
+                    parsing = parse_status(check)
+                    send_message(bot, message=parsing)
             except Exception as error:
                 message = f'Сбой в работе программы: {error}'
                 send_message(bot, message=message)
